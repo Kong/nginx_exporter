@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+  "os/exec"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
@@ -36,6 +37,7 @@ type Exporter struct {
 	processedConnections *prometheus.Desc
 	currentConnections   *prometheus.GaugeVec
 	nginxUp              prometheus.Gauge
+  nginxSyntaxCorrect   prometheus.Gauge
 }
 
 // NewExporter returns an initialized Exporter.
@@ -65,6 +67,11 @@ func NewExporter(uri string) *Exporter {
 			Name:      "up",
 			Help:      "Whether the nginx is up.",
 		}),
+		nginxSyntaxCorrect: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "syntax_correct",
+			Help:      "Whether the nginx config syntax is valid.",
+		}),
 		client: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: *insecure},
@@ -89,6 +96,14 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 		return fmt.Errorf("Error scraping nginx: %v", err)
 	}
 	e.nginxUp.Set(1)
+
+  cmd := "/usr/sbin/nginx"
+  args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
+  if err := exec.Command(cmd, args...).Run(); err != nil {
+    e.nginxSyntaxCorrect.Set(0)
+  } else {
+    e.nginxSyntaxCorrect.Set(1)
+  }
 
 	data, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -173,6 +188,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	}
 	e.currentConnections.Collect(ch)
 	e.nginxUp.Collect(ch)
+	e.nginxSyntaxCorrect.Collect(ch)
 	return
 }
 

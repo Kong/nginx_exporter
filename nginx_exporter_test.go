@@ -23,7 +23,7 @@ func TestNginxStatus(t *testing.T) {
 	})
 	server := httptest.NewServer(handler)
 
-	e := NewExporter(server.URL)
+	e := NewExporter(server.URL, server.URL)
 	ch := make(chan prometheus.Metric)
 
 	go func() {

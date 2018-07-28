@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-  "os/exec"
+	"os/exec"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
@@ -20,16 +20,18 @@ const (
 )
 
 var (
-	listeningAddress = flag.String("telemetry.address", ":9113", "Address on which to expose metrics.")
-	metricsEndpoint  = flag.String("telemetry.endpoint", "/metrics", "Path under which to expose metrics.")
-	nginxScrapeURI   = flag.String("nginx.scrape_uri", "http://localhost/nginx_status", "URI to nginx stub status page")
-	insecure         = flag.Bool("insecure", true, "Ignore server certificate if using https")
+	listeningAddress     = flag.String("telemetry.address", ":9113", "Address on which to expose metrics.")
+	metricsEndpoint      = flag.String("telemetry.endpoint", "/metrics", "Path under which to expose metrics.")
+	nginxStatusScrapeURI = flag.String("nginx.scrape_uri", "http://localhost/nginx_status", "URI to nginx stub status page")
+	nginxHealthScrapeURI = flag.String("nginx.health_uri", "http://localhost/nginx_health", "URI to a generic HTTP(s) health endpoint")
+	insecure             = flag.Bool("insecure", true, "Ignore server certificate if using https")
 )
 
 // Exporter collects nginx stats from the given URI and exports them using
 // the prometheus metrics package.
 type Exporter struct {
-	URI    string
+	statusURI    string
+	healthURI    string
 	mutex  sync.RWMutex
 	client *http.Client
 
@@ -37,13 +39,14 @@ type Exporter struct {
 	processedConnections *prometheus.Desc
 	currentConnections   *prometheus.GaugeVec
 	nginxUp              prometheus.Gauge
-  nginxSyntaxCorrect   prometheus.Gauge
+	nginxSyntaxCorrect   prometheus.Gauge
 }
 
 // NewExporter returns an initialized Exporter.
-func NewExporter(uri string) *Exporter {
+func NewExporter(status_uri string, health_uri string) *Exporter {
 	return &Exporter{
-		URI: uri,
+		statusURI: status_uri,
+    healthURI: health_uri,
 		scrapeFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "exporter_scrape_failures_total",
@@ -90,22 +93,37 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
-	resp, err := e.client.Get(e.URI)
+	resp, err := e.client.Get(e.healthURI)
 	if err != nil {
 		e.nginxUp.Set(0)
-		return fmt.Errorf("Error scraping nginx: %v", err)
+		return fmt.Errorf("Error scraping nginx health endpoint: %v", err)
+	}
+
+	data, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		if err != nil {
+			data = []byte(err.Error())
+		}
+		return fmt.Errorf("Status %s (%d): %s", resp.Status, resp.StatusCode, data)
+	}
+
+	cmd := "/usr/sbin/nginx"
+	args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
+	if err := exec.Command(cmd, args...).Run(); err != nil {
+	  e.nginxSyntaxCorrect.Set(0)
+	} else {
+	  e.nginxSyntaxCorrect.Set(1)
+	}
+
+	resp, err = e.client.Get(e.statusURI)
+	if err != nil {
+		e.nginxUp.Set(0)
+		return fmt.Errorf("Error scraping nginx status endpoint: %v", err)
 	}
 	e.nginxUp.Set(1)
 
-  cmd := "/usr/sbin/nginx"
-  args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
-  if err := exec.Command(cmd, args...).Run(); err != nil {
-    e.nginxSyntaxCorrect.Set(0)
-  } else {
-    e.nginxSyntaxCorrect.Set(1)
-  }
-
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err = ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		if err != nil {
@@ -195,7 +213,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 func main() {
 	flag.Parse()
 
-	exporter := NewExporter(*nginxScrapeURI)
+	exporter := NewExporter(*nginxStatusScrapeURI, *nginxHealthScrapeURI)
 	prometheus.MustRegister(exporter)
 
 	log.Infof("Starting Server: %s", *listeningAddress)

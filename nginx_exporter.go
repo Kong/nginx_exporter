@@ -93,6 +93,14 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
+	cmd := "/usr/sbin/nginx"
+	args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
+	if err := exec.Command(cmd, args...).Run(); err != nil {
+	  e.nginxSyntaxCorrect.Set(0)
+	} else {
+	  e.nginxSyntaxCorrect.Set(1)
+	}
+
 	resp, err := e.client.Get(e.healthURI)
 	if err != nil {
 		e.nginxUp.Set(0)
@@ -106,14 +114,6 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 			data = []byte(err.Error())
 		}
 		return fmt.Errorf("Status %s (%d): %s", resp.Status, resp.StatusCode, data)
-	}
-
-	cmd := "/usr/sbin/nginx"
-	args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
-	if err := exec.Command(cmd, args...).Run(); err != nil {
-	  e.nginxSyntaxCorrect.Set(0)
-	} else {
-	  e.nginxSyntaxCorrect.Set(1)
 	}
 
 	resp, err = e.client.Get(e.statusURI)

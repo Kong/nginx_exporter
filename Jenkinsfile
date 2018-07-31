@@ -32,9 +32,13 @@ node {
         sh "go build -o ${jobconsolename}"
       }
 
-      stage('Deploy') {
-        if (env.BRANCH_NAME == 'master') {
-          archiveArtifacts artifacts: "${jobconsolename}"
+      def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
+
+      if (tag) {
+        stage('Deploy') {
+          if (env.BRANCH_NAME == 'master') {
+            archiveArtifacts artifacts: "${jobconsolename}"
+          }
         }
       }
     }

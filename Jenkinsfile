@@ -38,7 +38,8 @@ node {
       if (tag) {
         stage('Deploy') {
           if (env.BRANCH_NAME == 'master') {
-            archiveArtifacts artifacts: "${jobconsolename}"
+            sh "mkdir -p /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
+            sh "cp -v ${jobconsolename} /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
           }
         }
       }

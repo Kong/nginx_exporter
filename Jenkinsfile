@@ -15,6 +15,7 @@ node {
       stage('Checkout') {
         echo 'Checking out SCM'
         checkout scm
+        sh 'git fetch'
       }
       
       stage('Pre Test') {

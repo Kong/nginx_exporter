@@ -93,8 +93,8 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
-	cmd := "/usr/sbin/nginx"
-	args := []string{"-c", "/etc/nginx/nginx.conf", "-t"}
+	cmd := "/usr/local/openresty/nginx/sbin/nginx"
+	args := []string{"-c", "/etc/openresty/nginx.conf", "-t"}
 	if err := exec.Command(cmd, args...).Run(); err != nil {
 	  e.nginxSyntaxCorrect.Set(0)
 	} else {

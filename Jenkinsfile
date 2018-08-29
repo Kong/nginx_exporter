@@ -1,48 +1,74 @@
-node {
-  def root = tool name: 'Go 1.10', type: 'go'
+def jobnameparts = JOB_NAME.tokenize('/') as String[]
+def jobconsolename = jobnameparts[0]
+def gopackage = "${jobconsolename}"
 
-  def jobnameparts = JOB_NAME.tokenize('/') as String[]
-  def jobconsolename = jobnameparts[0]
+pipeline {
+  agent any
 
-  ws("${JENKINS_HOME}/jobs/${jobconsolename}/builds/${BUILD_ID}/") {
-    withEnv([
-      "GOPATH=${JENKINS_HOME}/jobs/${jobconsolename}/builds",
-      "GOROOT=${root}",
-      "PATH+GO=${root}/bin"
-      ]) {
-      env.PATH="${GOPATH}/bin:$PATH"
-      
-      stage('Checkout') {
-        echo 'Checking out SCM'
-        checkout scm
-        sh 'git fetch'
-      }
-      
-      stage('Pre Test') {
-        echo 'Pulling Dependencies'
-
-        sh "rm -rf ../src/${jobconsolename} && mkdir -p ../src/${jobconsolename} && cp -vr * ../src/${jobconsolename}"
-    
-        sh 'go version'
-        sh "cd ../src/${jobconsolename} && go get -v"
-      }
+  tools {
+    go 'Go 1.10'
+  }
   
-      stage('Build') {
-        echo 'Building Executable'
-      
-        sh "go build -o ${jobconsolename}"
-      }
+  environment {
+    GOPATH = "${WORKSPACE}"
+    GOROOT = tool name: 'Go 1.10', type: 'go'
+    PATH = "${GOPATH}/bin:$PATH"
+  }
 
-      def tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
+  stages {
+    stage('Checkout') {
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'Githbu', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          echo 'Checking out SCM'
+          checkout scm
 
-      if (tag) {
-        stage('Deploy') {
-          if (env.BRANCH_NAME == 'master') {
-            sh "mkdir -p /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
-            sh "cp -v ${jobconsolename} /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
-          }
+          sh 'git config credential.helper \'!f() { sleep 1; echo "username=${USERNAME}\npassword=${PASSWORD}"; }; f\''
+          sh 'git fetch'
         }
       }
+    }
+      
+    stage('Install dependencies') {
+      steps {
+        sh 'go version'
+        sh "rm -rf src && mkdir -p src/${gopackage}"
+        sh "ln -sf ${WORKSPACE}/* src/${gopackage}"
+        sh "cd src/${gopackage} && go get -v"
+      }
+    }
+
+    stage('Run tests') {
+      steps {
+        sh "cd src/${gopackage} && go test"
+      }
+    }
+  
+    stage('Build') {
+      steps {
+        sh "cd src/${gopackage} && go build -o ${jobconsolename}"
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        script {
+          tag = sh(returnStdout: true, script: "git tag --contains | head -1").trim()
+          if (env.BRANCH_NAME != 'master' || !tag) {
+            return
+          }
+
+          sh "mkdir -p /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
+          sh "cp -v src/${gopackage}/${jobconsolename} /var/lib/jenkins/bindeploy/${jobconsolename}/${tag}"
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sendSlackNotification(currentBuild)
+      // cleanup current workspace
+      deleteDir() 
     }
   }
 }

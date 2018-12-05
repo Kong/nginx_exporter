@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
-	"os/exec"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
@@ -30,10 +31,10 @@ var (
 // Exporter collects nginx stats from the given URI and exports them using
 // the prometheus metrics package.
 type Exporter struct {
-	statusURI    string
-	healthURI    string
-	mutex  sync.RWMutex
-	client *http.Client
+	statusURI string
+	healthURI string
+	mutex     sync.RWMutex
+	client    *http.Client
 
 	scrapeFailures       prometheus.Counter
 	processedConnections *prometheus.Desc
@@ -46,7 +47,7 @@ type Exporter struct {
 func NewExporter(status_uri string, health_uri string) *Exporter {
 	return &Exporter{
 		statusURI: status_uri,
-    healthURI: health_uri,
+		healthURI: health_uri,
 		scrapeFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "exporter_scrape_failures_total",
@@ -93,12 +94,18 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
+
 	cmd := "/usr/local/openresty/nginx/sbin/nginx"
 	args := []string{"-c", "/etc/openresty/nginx.conf", "-t"}
 	if err := exec.Command(cmd, args...).Run(); err != nil {
-	  e.nginxSyntaxCorrect.Set(0)
+		e.nginxSyntaxCorrect.Set(0)
+		// save config for forensics
+		err = exec.Command("/usr/local/bin/gtar", "hzcf",
+			fmt.Sprintf("/tmp/openresty-conf_%d.tgz", time.Now().Unix()),
+			"/etc/openresty/").Run()
+		fmt.Println("->", err)
 	} else {
-	  e.nginxSyntaxCorrect.Set(1)
+		e.nginxSyntaxCorrect.Set(1)
 	}
 
 	resp, err := e.client.Get(e.healthURI)

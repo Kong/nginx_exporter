@@ -100,7 +100,7 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 	if err := exec.Command(cmd, args...).Run(); err != nil {
 		e.nginxSyntaxCorrect.Set(0)
 		// save config for forensics
-		err = exec.Command("/usr/local/bin/gtar", "hzcf",
+		err = exec.Command("/bin/tar", "hzcf",
 			fmt.Sprintf("/tmp/openresty-conf_%d.tgz", time.Now().Unix()),
 			"/etc/openresty/").Run()
 		fmt.Println("->", err)
